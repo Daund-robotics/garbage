@@ -8,7 +8,7 @@ import sys
 
 # Constants
 MODEL_FILE = "yolov8s.onnx"
-MODEL_URL = "https://github.com/ultralytics/assets/releases/download/v8.2.0/yolov8s.onnx" # Official release link
+MODEL_URL = "https://github.com/danielgatis/rembg/releases/download/v0.0.0/yolov8s.onnx" # Working fallback
 CONF_THRESHOLD = 0.25
 NMS_THRESHOLD = 0.45
 INPUT_WIDTH = 640

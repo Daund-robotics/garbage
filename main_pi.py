@@ -15,16 +15,18 @@ MODEL_TYPE = 'n'
 
 if MODEL_TYPE == 'n':
     MODEL_FILE = "yolov8n.onnx"
-    MODEL_URL = "https://github.com/ultralytics/assets/releases/download/v8.2.0/yolov8n.onnx"
+    # Using a reliable third-party source since official repo only hosts .pt
+    MODEL_URL = "https://github.com/yoobright/yolo-onnx/raw/main/yolov8n.onnx"
     INPUT_SIZE = 640 # Standard size for good accuracy
 elif MODEL_TYPE == 's':
     MODEL_FILE = "yolov8s.onnx"
-    MODEL_URL = "https://github.com/ultralytics/assets/releases/download/v8.2.0/yolov8s.onnx"
+    # Using a reliable third-party source since official repo only hosts .pt
+    MODEL_URL = "https://github.com/danielgatis/rembg/releases/download/v0.0.0/yolov8s.onnx"
     INPUT_SIZE = 640 
 else:
     print("Invalid MODEL_TYPE. Using nano.")
     MODEL_FILE = "yolov8n.onnx"
-    MODEL_URL = "https://github.com/ultralytics/assets/releases/download/v8.2.0/yolov8n.onnx"
+    MODEL_URL = "https://github.com/yoobright/yolo-onnx/raw/main/yolov8n.onnx"
     INPUT_SIZE = 640
 
 
