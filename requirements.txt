@@ -1,4 +1,4 @@
-ultralytics
 opencv-python
 cvzone
 numpy
+requests
