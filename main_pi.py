@@ -99,16 +99,10 @@ def main():
     # Initialize OpenCV DNN Network
     net = cv2.dnn.readNetFromONNX(MODEL_FILE)
     
-    # Try to use CUDA if available, else CPU
-    try:
-        net.setPreferableBackend(cv2.dnn.DNN_BACKEND_CUDA)
-        net.setPreferableTarget(cv2.dnn.DNN_TARGET_CUDA)
-    except:
-        # On RPi, try to use OpenCL (optional) but CPU is standard
-        # simple CPU fallback
-        # print("CUDA not available, utilizing CPU.") 
-        net.setPreferableBackend(cv2.dnn.DNN_BACKEND_OPENCV)
-        net.setPreferableTarget(cv2.dnn.DNN_TARGET_CPU)
+    # Use CPU by default to avoid CUDA errors without proper setup
+    print("Using CPU for inference")
+    net.setPreferableBackend(cv2.dnn.DNN_BACKEND_OPENCV)
+    net.setPreferableTarget(cv2.dnn.DNN_TARGET_CPU)
 
     # Initialize Webcam
     cap = cv2.VideoCapture(0)
