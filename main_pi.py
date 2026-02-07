@@ -7,14 +7,31 @@ import urllib.request
 import sys
 import time
 
-# Constants
-# Suggesting Nano model for Pi for better FPS
-MODEL_FILE = "yolov8n.onnx"
-MODEL_URL = "https://github.com/ultralytics/assets/releases/download/v8.2.0/yolov8n.onnx" 
+# --- CONFIGURATION ---
+# 'n' = Nano (Faster, Standard Accuracy)
+# 's' = Small (Slower, Higher Accuracy)
+MODEL_TYPE = 'n' 
+# ---------------------
+
+if MODEL_TYPE == 'n':
+    MODEL_FILE = "yolov8n.onnx"
+    MODEL_URL = "https://github.com/ultralytics/assets/releases/download/v8.2.0/yolov8n.onnx"
+    INPUT_SIZE = 640 # Standard size for good accuracy
+elif MODEL_TYPE == 's':
+    MODEL_FILE = "yolov8s.onnx"
+    MODEL_URL = "https://github.com/ultralytics/assets/releases/download/v8.2.0/yolov8s.onnx"
+    INPUT_SIZE = 640 
+else:
+    print("Invalid MODEL_TYPE. Using nano.")
+    MODEL_FILE = "yolov8n.onnx"
+    MODEL_URL = "https://github.com/ultralytics/assets/releases/download/v8.2.0/yolov8n.onnx"
+    INPUT_SIZE = 640
+
+
+INPUT_WIDTH = INPUT_SIZE
+INPUT_HEIGHT = INPUT_SIZE
 CONF_THRESHOLD = 0.25
 NMS_THRESHOLD = 0.45
-INPUT_WIDTH = 320 # Reduced input size for faster inference on Pi
-INPUT_HEIGHT = 320
 
 # Object classes for COCO dataset
 classNames = ["person", "bicycle", "car", "motorbike", "aeroplane", "bus", "train", "truck", "boat",
@@ -67,6 +84,8 @@ def download_model(url, path):
         return False
 
 def main():
+    print(f"Starting Garbage Detection with {MODEL_FILE}...")
+    
     # Check for model and download if missing
     if not os.path.exists(MODEL_FILE):
         print(f"Model file {MODEL_FILE} not found.")
@@ -83,13 +102,15 @@ def main():
         net.setPreferableBackend(cv2.dnn.DNN_BACKEND_CUDA)
         net.setPreferableTarget(cv2.dnn.DNN_TARGET_CUDA)
     except:
-        print("CUDA not available, running on CPU.")
+        # On RPi, try to use OpenCL (optional) but CPU is standard
+        # simple CPU fallback
+        # print("CUDA not available, utilizing CPU.") 
         net.setPreferableBackend(cv2.dnn.DNN_BACKEND_OPENCV)
         net.setPreferableTarget(cv2.dnn.DNN_TARGET_CPU)
 
     # Initialize Webcam
     cap = cv2.VideoCapture(0)
-    cap.set(3, 640)  # Lower resolution for Pi
+    cap.set(3, 640)  # Resolution 640x480
     cap.set(4, 480)
 
     if not cap.isOpened():
@@ -163,7 +184,6 @@ def main():
                     displayName = garbage_map[currentClass]
                     
                     # Distance Calculation
-                    # Use min(w, h) to be consistent with diameter
                     distance = calculate_distance(FOCAL_LENGTH, KNOWN_WIDTH, min(width, height))
                     
                     # Color Logic
@@ -180,7 +200,7 @@ def main():
 
         end = time.time()
         fps = 1 / (end - start)
-        cv2.putText(img, f"FPS: {int(fps)}", (20, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 0, 0), 2)
+        cv2.putText(img, f"FPS: {int(fps)} Model: {MODEL_TYPE.upper()}", (20, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 0, 0), 2)
 
         cv2.imshow("Pi Garbage Detection", img)
         if cv2.waitKey(1) & 0xFF == ord('q'):
