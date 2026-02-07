@@ -1,17 +1,18 @@
 import cv2
 import cvzone
 import math
-from ultralytics import YOLO
+import numpy as np
+import os
+import urllib.request
+import sys
 
-# Initialize the webcam
-# Use 0 for default webcam, 1 for external if 0 is built-in
-cap = cv2.VideoCapture(0)
-cap.set(3, 1280)
-cap.set(4, 720)
-
-# Load the YOLO model
-# Using yolov8s.pt (small) for better accuracy on rotated objects compared to nano.
-model = YOLO("yolov8s.pt")
+# Constants
+MODEL_FILE = "yolov8s.onnx"
+MODEL_URL = "https://github.com/ultralytics/assets/releases/download/v8.2.0/yolov8s.onnx" # Official release link
+CONF_THRESHOLD = 0.25
+NMS_THRESHOLD = 0.45
+INPUT_WIDTH = 640
+INPUT_HEIGHT = 640
 
 # Object classes for COCO dataset
 classNames = ["person", "bicycle", "car", "motorbike", "aeroplane", "bus", "train", "truck", "boat",
@@ -45,7 +46,6 @@ garbage_map = {
 }
 
 # Distance Estimation Constants
-# Adjust these based on your camera calibration
 KNOWN_WIDTH = 7.0  # cm (average width of a bottle/can)
 FOCAL_LENGTH = 700 # pixels (needs calibration, 600-800 is typical for 720p webcams)
 
@@ -54,57 +54,131 @@ def calculate_distance(focal_length, known_width, pixel_width):
         return 0
     return (known_width * focal_length) / pixel_width
 
-while True:
-    success, img = cap.read()
-    if not success:
-        break
+def download_model(url, path):
+    print(f"Downloading {path} from {url}...")
+    try:
+        urllib.request.urlretrieve(url, path)
+        print("Download complete.")
+        return True
+    except Exception as e:
+        print(f"Error downloading model: {e}")
+        return False
+
+def main():
+    # Check for model and download if missing
+    if not os.path.exists(MODEL_FILE):
+        print(f"Model file {MODEL_FILE} not found.")
+        if not download_model(MODEL_URL, MODEL_FILE):
+             print("Please manually download yolov8s.onnx and place it in this directory.")
+             input("Press Enter to exit...")
+             return
+
+    # Initialize OpenCV DNN Network
+    net = cv2.dnn.readNetFromONNX(MODEL_FILE)
     
-    # Enable Test Time Augmentation (augment=True) for better robustness at angles
-    results = model(img, stream=True, augment=True)
+    # Try to use CUDA if available, else CPU
+    try:
+        net.setPreferableBackend(cv2.dnn.DNN_BACKEND_CUDA)
+        net.setPreferableTarget(cv2.dnn.DNN_TARGET_CUDA)
+    except:
+        print("CUDA not available, running on CPU.")
+        net.setPreferableBackend(cv2.dnn.DNN_BACKEND_OPENCV)
+        net.setPreferableTarget(cv2.dnn.DNN_TARGET_CPU)
 
-    for r in results:
-        boxes = r.boxes
-        for box in boxes:
-            # Bounding Box
-            x1, y1, x2, y2 = box.xyxy[0]
-            x1, y1, x2, y2 = int(x1), int(y1), int(x2), int(y2)
-            w, h = x2 - x1, y2 - y1
+    # Initialize Webcam
+    cap = cv2.VideoCapture(0)
+    cap.set(3, 1280)
+    cap.set(4, 720)
 
-            # Confidence
-            conf = math.ceil((box.conf[0] * 100)) / 100
+    if not cap.isOpened():
+        print("Error: Could not open webcam.")
+        return
 
-            # Class Name
-            cls = int(box.cls[0])
-            currentClass = classNames[cls]
+    while True:
+        success, img = cap.read()
+        if not success:
+            break
 
-            # Filter for garbage classes
-            if currentClass in garbage_map and conf > 0.2:
-                # Display Name
-                displayName = garbage_map[currentClass]
+        # Preprocess Image
+        blob = cv2.dnn.blobFromImage(img, 1/255.0, (INPUT_WIDTH, INPUT_HEIGHT), swapRB=True, crop=False)
+        net.setInput(blob)
+        
+        # Forward Pass
+        outputs = net.forward()
+        
+        # Output shape is (1, 84, 8400) -> Transpose to (1, 8400, 84)
+        outputs = np.transpose(outputs, (0, 2, 1)) 
+        
+        # Extract rows
+        rows = outputs[0]
+        
+        boxes = []
+        confidences = []
+        class_ids = []
+
+        image_h, image_w, _ = img.shape
+        x_factor = image_w / INPUT_WIDTH
+        y_factor = image_h / INPUT_HEIGHT
+
+        for row in rows:
+            classes_scores = row[4:]
+            max_score_idx = np.argmax(classes_scores)
+            max_score = classes_scores[max_score_idx]
+            
+            if max_score >= CONF_THRESHOLD:
+                # Get box coordinates (cx, cy, w, h)
+                cx, cy, w, h = row[0], row[1], row[2], row[3]
                 
-                # Calculate Distance
-                # Use min(w, h) to approximate the diameter (shorter side) of the object,
-                # which allows distance estimation to work even if the object is horizontal.
-                # Assuming KNOWN_WIDTH corresponds to the object's diameter/width.
-                distance = calculate_distance(FOCAL_LENGTH, KNOWN_WIDTH, min(w, h))
+                # Scale back to original image
+                left = int((cx - 0.5 * w) * x_factor)
+                top = int((cy - 0.5 * h) * y_factor)
+                width = int(w * x_factor)
+                height = int(h * y_factor)
                 
-                # Determine Color
-                # Green if < 20cm, Red otherwise
-                if distance < 20: 
-                    color = (0, 255, 0) # Green
-                else:
-                    color = (0, 0, 255) # Red
+                boxes.append([left, top, width, height])
+                confidences.append(float(max_score))
+                class_ids.append(max_score_idx)
 
-                # Draw Visuals
-                cvzone.cornerRect(img, (x1, y1, w, h), l=9, rt=5, colorR=color, colorC=color)
+        # NMS
+        indices = cv2.dnn.NMSBoxes(boxes, confidences, CONF_THRESHOLD, NMS_THRESHOLD)
+
+        for i in indices:
+            # Depending on opencv version, i might be a list or int
+            idx = i if isinstance(i, (int, np.integer)) else i[0]
+            
+            box = boxes[idx]
+            left, top, width, height = box[0], box[1], box[2], box[3]
+            conf = confidences[idx]
+            cls_id = class_ids[idx]
+            
+            if cls_id < len(classNames):
+                currentClass = classNames[cls_id]
                 
-                # Display Text
-                text = f'{displayName} {int(distance)}cm'
-                cvzone.putTextRect(img, text, (max(0, x1), max(35, y1)), scale=1.5, thickness=2, offset=5, colorR=color)
+                # Filter for garbage classes
+                if currentClass in garbage_map:
+                    displayName = garbage_map[currentClass]
+                    
+                    # Distance Calculation
+                    distance = calculate_distance(FOCAL_LENGTH, KNOWN_WIDTH, min(width, height))
+                    
+                    # Color Logic
+                    if distance < 20: 
+                        color = (0, 255, 0) # Green
+                    else:
+                        color = (0, 0, 255) # Red
 
-    cv2.imshow("Garbage Detection", img)
-    if cv2.waitKey(1) & 0xFF == ord('q'):
-        break
+                    # Draw Visuals
+                    cvzone.cornerRect(img, (left, top, width, height), l=9, rt=5, colorR=color, colorC=color)
+                    
+                    text = f'{displayName} {int(distance)}cm'
+                    cvzone.putTextRect(img, text, (max(0, left), max(35, top)), scale=1.5, thickness=2, offset=5, colorR=color)
 
-cap.release()
-cv2.destroyAllWindows()
+        cv2.imshow("Garbage Detection", img)
+        if cv2.waitKey(1) & 0xFF == ord('q'):
+            break
+
+    cap.release()
+    cv2.destroyAllWindows()
+
+if __name__ == "__main__":
+    main()
