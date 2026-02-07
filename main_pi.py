@@ -105,13 +105,23 @@ def main():
     net.setPreferableTarget(cv2.dnn.DNN_TARGET_CPU)
 
     # Initialize Webcam
-    cap = cv2.VideoCapture(0)
+    # Try indices 0 and 1 to find the USB camera
+    cap = None
+    for cam_index in [0, 1]:
+        print(f"Trying to open camera index {cam_index}...")
+        cap = cv2.VideoCapture(cam_index)
+        if cap.isOpened():
+            print(f"Successfully opened camera index {cam_index}")
+            break
+        cap.release()
+    
+    if cap is None or not cap.isOpened():
+        print("Error: Could not open any webcam (tried index 0 and 1).")
+        print("Please check your USB connection or try 'ls /dev/video*' in terminal.")
+        return
+        
     cap.set(3, 640)  # Resolution 640x480
     cap.set(4, 480)
-
-    if not cap.isOpened():
-        print("Error: Could not open webcam.")
-        return
 
     while True:
         success, img = cap.read()

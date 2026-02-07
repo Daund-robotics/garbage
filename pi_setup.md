@@ -46,3 +46,7 @@ chmod +x run.sh
 - **Model**: The project uses `yolov8n.onnx` (Nano model) which is optimized for speed on the Raspberry Pi CPU.
 - **Performance**: Expect around 1-3 FPS on a standard Pi 4B CPU. For higher performance, an accelerator (like Hailo-8L) or further optimization (NCNN) would be needed, but ONNX is great for starting out.
 - **Headless Mode**: If running without a monitor, `cv2.imshow` will fail. Ensure you have a display attached or use X11 forwarding.
+- **USB Camera**: The script now automatically tries to connect to camera index 0 and then 1. If your camera is not detected:
+  - Check connections.
+  - Run `ls /dev/video*` to see if the device is recognized.
+  - Ensure no other process is using the camera.
