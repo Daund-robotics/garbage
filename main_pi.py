@@ -6,6 +6,7 @@ import os
 import urllib.request
 import sys
 import time
+import threading
 import automation_pre_test
 
 # --- CONFIGURATION ---
@@ -21,12 +22,12 @@ if MODEL_TYPE == 'n':
     MODEL_FILE = "yolov8n.onnx"
     # Using a reliable third-party source since official repo only hosts .pt
     MODEL_URL = "https://github.com/yoobright/yolo-onnx/raw/main/yolov8n.onnx"
-    INPUT_SIZE = 640 # Standard size for good accuracy
+    INPUT_SIZE = 640 # Reverted to 640
 elif MODEL_TYPE == 's':
     MODEL_FILE = "yolov8s.onnx"
     # Using a reliable third-party source since official repo only hosts .pt
     MODEL_URL = "https://huggingface.co/pyronear/yolov8s/resolve/main/yolov8s.onnx"
-    INPUT_SIZE = 640 
+    INPUT_SIZE = 640
 else:
     print("Invalid MODEL_TYPE. Using nano.")
     MODEL_FILE = "yolov8n.onnx"
@@ -116,6 +117,43 @@ def preprocess_image(img, input_size):
     
     return padded_img, scale, (pad_top, pad_left)
 
+class ThreadedCamera:
+    def __init__(self, src=0):
+        self.capture = cv2.VideoCapture(src)
+        self.capture.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+        self.capture.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+        
+        self.ret, self.frame = self.capture.read()
+        self.stopped = False
+        self.lock = threading.Lock()
+        
+        # Start the thread
+        self.thread = threading.Thread(target=self.update, args=())
+        self.thread.daemon = True
+        self.thread.start()
+
+    def update(self):
+        while not self.stopped:
+            if self.capture.isOpened():
+                ret, frame = self.capture.read()
+                with self.lock:
+                    self.ret = ret
+                    self.frame = frame
+            else:
+                time.sleep(0.1)
+
+    def read(self):
+        with self.lock:
+            return self.ret, self.frame.copy() if self.ret else None
+
+    def release(self):
+        self.stopped = True
+        self.thread.join()
+        self.capture.release()
+    
+    def isOpened(self):
+        return self.capture.isOpened()
+
 def main():
     print(f"Starting Garbage Detection with {MODEL_FILE}...")
     
@@ -149,27 +187,38 @@ def main():
     cap = None
     for cam_index in [0, 1]:
         print(f"Trying to open camera index {cam_index}...")
-        cap = cv2.VideoCapture(cam_index)
-        if cap.isOpened():
-            print(f"Successfully opened camera index {cam_index}")
-            break
-        cap.release()
+        # Check if we can open it with standard VideoCapture first
+        temp_cap = cv2.VideoCapture(cam_index)
+        if temp_cap.isOpened():
+            print(f"Successfully detected camera index {cam_index}")
+            temp_cap.release()
+            try:
+                cap = ThreadedCamera(cam_index)
+                if cap.isOpened():
+                    print(f"Started ThreadedCamera on index {cam_index}")
+                    break
+            except Exception as e:
+                print(f"Failed to start ThreadedCamera: {e}")
+        else:
+             temp_cap.release()
     
     if cap is None or not cap.isOpened():
         print("Error: Could not open any webcam (tried index 0 and 1).")
         print("Please check your USB connection or try 'ls /dev/video*' in terminal.")
         return
         
-    cap.set(3, 640)  # Resolution 640x480
-    cap.set(4, 480)
+    # cap.set(3, 640)  # Resolution 640x480 - Handled in ThreadedCamera
+    # cap.set(4, 480)
 
     last_trigger_time = 0
     TRIGGER_COOLDOWN = 5
 
     while True:
         success, img = cap.read()
-        if not success:
-            break
+        if not success or img is None:
+            # Wait a bit if frame not available
+            time.sleep(0.01)
+            continue
         
         start = time.time()
 
@@ -263,7 +312,7 @@ def main():
 
         end = time.time()
         fps = 1 / (end - start)
-        cv2.putText(img, f"FPS: {int(fps)} Model: {MODEL_TYPE.upper()}", (20, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 0, 0), 2)
+        cv2.putText(img, f"FPS: {int(fps)} Model: {MODEL_TYPE.upper()} Res: {INPUT_SIZE}", (20, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 0, 0), 2)
 
         cv2.imshow("Pi Garbage Detection", img)
         if cv2.waitKey(1) & 0xFF == ord('q'):
