@@ -1,197 +1,289 @@
-# ================================
-# automation_pre_test.py
-# ================================
+# ============================================
+# automation_pre_test.py  (INDUSTRIAL STABLE)
+# ============================================
 
-import RPi.GPIO as GPIO
+try:
+    import smbus
+except ImportError:
+    print("Warning: smbus not found. Using mock for testing.")
+    class MockSMBus:
+        def __init__(self, bus): pass
+        def write_byte_data(self, addr, reg, val): pass
+        def read_byte_data(self, addr, reg): return 0
+    smbus = type('obj', (object,), {'SMBus': MockSMBus})
+
 import time
-import Adafruit_PCA9685
+
+try:
+    import RPi.GPIO as GPIO
+except ImportError:
+    print("Warning: RPi.GPIO not found. Using mock for testing.")
+    class MockGPIO:
+        BCM = 10
+        OUT = 0
+        IN = 1
+        PUD_UP = 2
+        def setmode(self, mode): pass
+        def setwarnings(self, flag): pass
+        def setup(self, pin, mode, pull_up_down=None): pass
+        def output(self, pin, state): pass
+        def input(self, pin): return 0 # Simulate button press or not? 1 is unpressed usually
+        def cleanup(self): pass
+    GPIO = MockGPIO()
 
 # ================= GPIO SETUP =================
 GPIO.setmode(GPIO.BCM)
 GPIO.setwarnings(False)
 
-# ----- Limit Switches -----
-L1 = 5   # Bottom
-L2 = 6   # Top
+# ---- LIMIT SWITCHES ----
+L1 = 5
+L2 = 6
 
-GPIO.setup(L1, GPIO.IN, pull_up_down=GPIO.PUD_UP)
-GPIO.setup(L2, GPIO.IN, pull_up_down=GPIO.PUD_UP)
+# ---- SENSOR PINS ----
+WET_SENSOR_PIN   = 20
+METAL_SENSOR_PIN = 16
 
-# ----- Sensors -----
-METAL_SENSOR = 16
-WET_SENSOR   = 20
-
-GPIO.setup(METAL_SENSOR, GPIO.IN, pull_up_down=GPIO.PUD_UP)
-GPIO.setup(WET_SENSOR, GPIO.IN, pull_up_down=GPIO.PUD_UP)
-
-# ----- Lift Motor (L298N) -----
+# ---- MOTOR PINS ----
 LIFT_UP   = 15
 LIFT_DOWN = 14
 
+GPIO.setup(L1, GPIO.IN, pull_up_down=GPIO.PUD_UP)
+GPIO.setup(L2, GPIO.IN, pull_up_down=GPIO.PUD_UP)
+GPIO.setup(WET_SENSOR_PIN, GPIO.IN, pull_up_down=GPIO.PUD_UP)
+GPIO.setup(METAL_SENSOR_PIN, GPIO.IN, pull_up_down=GPIO.PUD_UP)
 GPIO.setup(LIFT_UP, GPIO.OUT)
 GPIO.setup(LIFT_DOWN, GPIO.OUT)
 
-# ================= PCA9685 SETUP =================
-# Try enabling I2C bus 1 explicitly if needed, but library defaults are usually good
-try:
-    pwm = Adafruit_PCA9685.PCA9685()
-    pwm.set_pwm_freq(50)  # 50Hz for servos
-except Exception as e:
-    print(f"Error initializing PCA9685: {e}")
-    print("Ensure 'Adafruit_PCA9685' is installed: pip install adafruit-pca9685")
+# ================= PCA9685 =================
+MODE1 = 0x00
+MODE2 = 0x01
+PRESCALE = 0xFE
+LED0_ON_L = 0x06
 
-# Servo Channels
-S0 = 0  # Garbage Dumper
-S1 = 1  # Pick Bucket
-S3 = 3  # Sorting Gate
+bus = smbus.SMBus(1)
+PCA_ADDR = 0x40
 
-# ================= SERVO FUNCTION =================
-def set_servo(channel, angle):
-    # Map 0-180 to 150-600 pulse width (approximate standard range)
-    pulse = int(150 + (angle / 180.0) * 450)
+SERVO_MIN = 102
+SERVO_MAX = 512
+
+DEFAULTS = {
+    0: 30,
+    1: 30,
+    3: 90
+}
+
+# ================= PCA FUNCTIONS =================
+def write_byte(reg, val):
     try:
-        pwm.set_pwm(channel, 0, pulse)
-    except:
-        pass # Handle potential I2C errors gracefully
+        bus.write_byte_data(PCA_ADDR, reg, val)
+    except Exception as e:
+        print(f"Error writing to PCA9685: {e}")
 
-# ================= MOTOR FUNCTIONS =================
-def lift_up():
-    GPIO.output(LIFT_UP, True)
-    GPIO.output(LIFT_DOWN, False)
+def read_byte(reg):
+    try:
+        return bus.read_byte_data(PCA_ADDR, reg)
+    except Exception as e:
+        print(f"Error reading from PCA9685: {e}")
+        return 0
 
-def lift_down():
-    GPIO.output(LIFT_UP, False)
-    GPIO.output(LIFT_DOWN, True)
+def init_pca():
+    try:
+        write_byte(MODE1, 0x00)
+        write_byte(MODE2, 0x04)
+        time.sleep(0.01)
+    except Exception as e:
+        print(f"Error initializing PCA9685: {e}")
 
-def lift_stop():
-    GPIO.output(LIFT_UP, False)
-    GPIO.output(LIFT_DOWN, False)
+def set_pwm_freq(freq):
+    try:
+        prescaleval = 25000000.0 / 4096.0 / freq - 1
+        prescale = int(prescaleval + 0.5)
 
-# ================= DEFAULT POSITION =================
-def set_default_positions():
-    set_servo(S0, 0)
-    set_servo(S1, 150)
-    set_servo(S3, 0)
-    print("✅ Default position is set")
+        oldmode = read_byte(MODE1)
+        write_byte(MODE1, (oldmode & 0x7F) | 0x10)
+        write_byte(PRESCALE, prescale)
+        write_byte(MODE1, oldmode)
+        time.sleep(0.005)
+        write_byte(MODE1, oldmode | 0x80)
+    except Exception as e:
+        print(f"Error setting PWM frequency: {e}")
 
-# ================= INITIALIZATION =================
+def set_pwm(ch, on, off):
+    try:
+        base = LED0_ON_L + 4 * ch
+        write_byte(base, on & 0xFF)
+        write_byte(base+1, on >> 8)
+        write_byte(base+2, off & 0xFF)
+        write_byte(base+3, off >> 8)
+    except Exception as e:
+        print(f"Error setting PWM: {e}")
+
+def angle_to_pwm(angle):
+    pulse = SERVO_MIN + (angle/180.0)*(SERVO_MAX-SERVO_MIN)
+    return int(pulse)
+
+def move_servo(ch, angle):
+    print(f"Servo {ch} -> {angle} deg")
+    set_pwm(ch, 0, angle_to_pwm(angle))
+    time.sleep(0.3)
+
+# ================= MOTOR =================
+def motor_stop():
+    GPIO.output(LIFT_UP, 0)
+    GPIO.output(LIFT_DOWN, 0)
+
+def motor_up():
+    GPIO.output(LIFT_UP, 1)
+    GPIO.output(LIFT_DOWN, 0)
+
+def motor_down():
+    GPIO.output(LIFT_UP, 0)
+    GPIO.output(LIFT_DOWN, 1)
+
+# ================= MOVEMENT =================
+def move_up_until_L2():
+    motor_up()
+    # Add timeout to prevent infinite loop
+    start_time = time.time()
+    while GPIO.input(L2) == 1:
+        if time.time() - start_time > 10: # 10s timeout
+            print("Timeout moving up!")
+            break
+        time.sleep(0.05)
+    motor_stop()
+    print("TOP Reached")
+
+def move_down_until_L1(check_sensors=False):
+
+    motor_down()
+
+    metal_confirmed = False
+    wet_confirmed = False
+
+    metal_start = None
+    wet_start = None
+
+    REQUIRED_TIME = 3  # seconds stable detection required
+    
+    start_time = time.time()
+
+    while GPIO.input(L1) == 1:
+        # Safety timeout
+        if time.time() - start_time > 15: # 15s timeout
+             print("Timeout moving down!")
+             break
+
+        if check_sensors:
+
+            wet_raw   = GPIO.input(WET_SENSOR_PIN)
+            metal_raw = GPIO.input(METAL_SENSOR_PIN)
+
+            # ---- METAL LOGIC ----
+            if wet_raw == 1 and metal_raw == 0:
+                if metal_start is None:
+                    metal_start = time.time()
+                elif time.time() - metal_start >= REQUIRED_TIME:
+                    metal_confirmed = True
+            else:
+                metal_start = None
+
+            # ---- WET LOGIC ----
+            if wet_raw == 0 and metal_raw == 1:
+                if wet_start is None:
+                    wet_start = time.time()
+                elif time.time() - wet_start >= REQUIRED_TIME:
+                    wet_confirmed = True
+            else:
+                wet_start = None
+
+        time.sleep(0.05)
+
+    motor_stop()
+    print("BOTTOM Reached")
+
+    return metal_confirmed, wet_confirmed
+
+# ================= DEFAULT =================
+def set_defaults():
+    for ch, ang in DEFAULTS.items():
+        move_servo(ch, ang)
+
+# ================= AUTOMATION =================
+def automation_sequence():
+
+    print("\n===== AUTOMATION START =====")
+
+    move_servo(1, 150)
+    move_down_until_L1()
+    move_servo(1, 30)
+
+    move_up_until_L2()
+    time.sleep(4)
+
+    move_servo(1, 150)
+
+    metal, wet = move_down_until_L1(check_sensors=True)
+
+    print("Detection Result -> Metal:", metal, "| Wet:", wet)
+
+    if metal:
+        print("METAL CONFIRMED (3s stable)")
+        move_servo(3, 20)
+        move_servo(0, 140)
+        time.sleep(3)
+        move_servo(0, 30)
+        move_servo(3, 90)
+
+    elif wet:
+        print("WET CONFIRMED (3s stable)")
+        move_servo(3, 160)
+        move_servo(0, 140)
+        time.sleep(3)
+        move_servo(0, 30)
+        move_servo(3, 90)
+
+    else:
+        print("NO OBJECT CONFIRMED")
+        move_servo(3, 90)
+        move_servo(0, 140)
+        time.sleep(3)
+        move_servo(0, 30)
+        move_servo(3, 90)
+
+    move_up_until_L2()
+
+    print("===== AUTOMATION COMPLETE =====\n")
+
+# ================= MAIN =================
 if __name__ == "__main__":
+
+    print("SYSTEM START")
+
+    init_pca()
+    set_pwm_freq(50)
+    time.sleep(0.5)
+
+    set_defaults()
+
+    if GPIO.input(L2) == 1:
+        move_up_until_L2()
+        set_defaults()
+
+    print("Press N to start")
+
     try:
-        set_default_positions()
-
-        # ================= MOVE LIFT UP UNTIL L2 =================
-        print("Checking L2 position...")
-        if GPIO.input(L2) == 1: # Not triggered (HIGH due to Pull-Up)
-            print("Moving Lift UP...")
-            while GPIO.input(L2) == 1:
-                lift_up()
-                time.sleep(0.01)
-        lift_stop()
-        print("✅ Homing Complete (L2 Triggered)")
-        set_default_positions()
-
-        print("System Ready. Type 'N' to start sequence.")
-
-        # ================= MAIN LOOP =================
         while True:
+            cmd = input(">> ")
 
-            cmd = input("Enter Command: ")
-
-            if cmd.upper() == "N":
-
-                print("🚀 Starting Automation Sequence")
-
-                # Step 1
-                set_servo(S1, 150)
-                time.sleep(0.3)
-
-                # Step 2 - Lift Down until L1
-                print("⬇️ Lift DOWN to L1...")
-                while GPIO.input(L1) == 1:
-                    lift_down()
-                    time.sleep(0.001)
-                lift_stop()
-
-                set_servo(S1, 30)
-                time.sleep(0.5)
-
-                # Step 3 - Lift Up until L2
-                print("⬆️ Lift UP to L2...")
-                while GPIO.input(L2) == 1:
-                    lift_up()
-                    time.sleep(0.001)
-                lift_stop()
-
-                print("⏳ Waiting 4s...")
-                time.sleep(4)
-
-                # Step 4
-                set_servo(S1, 150)
-
-                metal_detected = False
-                wet_detected = False
-
-                # Step 5 - Lift Down and check sensors simultaneously
-                print("⬇️ Lift DOWN scanning sensors...")
-                while GPIO.input(L1) == 1:
-                    lift_down()
-
-                    if GPIO.input(METAL_SENSOR) == 0:
-                        metal_detected = True
-                        print("🧲 Metal Detected!")
-
-                    if GPIO.input(WET_SENSOR) == 0:
-                        wet_detected = True
-                        print("💧 Wet Detected!")
-                    
-                    time.sleep(0.001)
-
-                lift_stop()
-
-                # Step 6 - Sorting
-                if metal_detected:
-                    print("➡️ Metal Detected -> Metal Bin")
-                    set_servo(S3, 0)
-                    time.sleep(0.1)
-                    set_servo(S0, 140)
-                    time.sleep(3)
-                    set_servo(S0, 0)
-
-                elif wet_detected:
-                    print("➡️ Wet Waste Detected -> Wet Bin")
-                    set_servo(S3, 140)
-                    time.sleep(0.1)
-                    set_servo(S0, 140)
-                    time.sleep(3)
-                    set_servo(S0, 0)
-
-                else:
-                    print("➡️ Dry Waste (Default)")
-                    # Assuming Dry is S3=70 (Center) based on previous context, 
-                    # OR user might want S3=0 (default in func) if not specified? 
-                    # Reusing user's logic: "if noting is detected... move s0-140..."
-                    # Since user code didn't set S3 in else block, it stays at last pos?
-                    # The prompt says "if noting is detected no metal and no wet then move s0- 140 delay 3s then s0 - 0"
-                    # It implies S3 stays or is irrelevant? But standard practice resets it.
-                    # I will keep user's exact logic structure.
-                    set_servo(S0, 140)
-                    time.sleep(3)
-                    set_servo(S0, 0)
-
-                # Step 7 - Lift Up to Home
-                print("⬆️ Lift UP to Home (L2)...")
-                while GPIO.input(L2) == 1:
-                    lift_up()
-                    time.sleep(0.001)
-                lift_stop()
-
-                print("✅ Cycle Completed. Ready Again.")
-
-            elif cmd.upper() == "Q":
+            if cmd.lower() == "exit":
                 break
 
+            if cmd.upper() == "N":
+                automation_sequence()
+
     except KeyboardInterrupt:
-        print("\nForce Stopped.")
-    finally:
-        lift_stop()
-        GPIO.cleanup()
+        pass
+
+    motor_stop()
+    GPIO.cleanup()
+    print("Shutdown")

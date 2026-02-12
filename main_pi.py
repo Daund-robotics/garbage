@@ -6,7 +6,11 @@ import os
 import urllib.request
 import sys
 import time
+import automation_pre_test
 
+# --- CONFIGURATION ---
+# 'n' = Nano (Faster, Standard Accuracy)
+# 's' = Small (Slower, Higher Accuracy)
 # --- CONFIGURATION ---
 # 'n' = Nano (Faster, Standard Accuracy)
 # 's' = Small (Slower, Higher Accuracy)
@@ -21,7 +25,7 @@ if MODEL_TYPE == 'n':
 elif MODEL_TYPE == 's':
     MODEL_FILE = "yolov8s.onnx"
     # Using a reliable third-party source since official repo only hosts .pt
-    MODEL_URL = "https://github.com/danielgatis/rembg/releases/download/v0.0.0/yolov8s.onnx"
+    MODEL_URL = "https://huggingface.co/pyronear/yolov8s/resolve/main/yolov8s.onnx"
     INPUT_SIZE = 640 
 else:
     print("Invalid MODEL_TYPE. Using nano.")
@@ -32,7 +36,7 @@ else:
 
 INPUT_WIDTH = INPUT_SIZE
 INPUT_HEIGHT = INPUT_SIZE
-CONF_THRESHOLD = 0.25
+CONF_THRESHOLD = 0.20
 NMS_THRESHOLD = 0.45
 
 # Object classes for COCO dataset
@@ -78,6 +82,10 @@ def calculate_distance(focal_length, known_width, pixel_width):
 def download_model(url, path):
     print(f"Downloading {path} from {url}...")
     try:
+        # User-Agent header sometimes helps with downloads
+        opener = urllib.request.build_opener()
+        opener.addheaders = [('User-Agent', 'Mozilla/5.0')]
+        urllib.request.install_opener(opener)
         urllib.request.urlretrieve(url, path)
         print("Download complete.")
         return True
@@ -85,9 +93,41 @@ def download_model(url, path):
         print(f"Error downloading model: {e}")
         return False
 
+def preprocess_image(img, input_size):
+    """
+    Resizes image to input_size with letterboxing to preserve aspect ratio.
+    Returns: padded_img, scale, (pad_top, pad_left)
+    """
+    h, w = img.shape[:2]
+    scale = min(input_size[0] / h, input_size[1] / w)
+    nh, nw = int(h * scale), int(w * scale)
+    
+    # Resize
+    resized_img = cv2.resize(img, (nw, nh))
+    
+    # Create blank canvas
+    padded_img = np.zeros((input_size[1], input_size[0], 3), dtype=np.uint8)
+    
+    # Center the resized image
+    pad_top = (input_size[1] - nh) // 2
+    pad_left = (input_size[0] - nw) // 2
+    
+    padded_img[pad_top:pad_top+nh, pad_left:pad_left+nw] = resized_img
+    
+    return padded_img, scale, (pad_top, pad_left)
+
 def main():
     print(f"Starting Garbage Detection with {MODEL_FILE}...")
     
+    # Initialize Automation
+    try:
+        automation_pre_test.init_pca()
+        automation_pre_test.set_pwm_freq(50)
+        time.sleep(0.5)
+        automation_pre_test.set_defaults()
+    except Exception as e:
+        print(f"Automation Init Failed: {e}")
+
     # Check for model and download if missing
     if not os.path.exists(MODEL_FILE):
         print(f"Model file {MODEL_FILE} not found.")
@@ -123,6 +163,9 @@ def main():
     cap.set(3, 640)  # Resolution 640x480
     cap.set(4, 480)
 
+    last_trigger_time = 0
+    TRIGGER_COOLDOWN = 5
+
     while True:
         success, img = cap.read()
         if not success:
@@ -130,8 +173,10 @@ def main():
         
         start = time.time()
 
-        # Preprocess Image
-        blob = cv2.dnn.blobFromImage(img, 1/255.0, (INPUT_WIDTH, INPUT_HEIGHT), swapRB=True, crop=False)
+        # Preprocess Image with Letterboxing
+        padded_img, scale, (pad_top, pad_left) = preprocess_image(img, (INPUT_WIDTH, INPUT_HEIGHT))
+        
+        blob = cv2.dnn.blobFromImage(padded_img, 1/255.0, (INPUT_WIDTH, INPUT_HEIGHT), swapRB=True, crop=False)
         net.setInput(blob)
         
         # Forward Pass
@@ -147,9 +192,8 @@ def main():
         confidences = []
         class_ids = []
 
-        image_h, image_w, _ = img.shape
-        x_factor = image_w / INPUT_WIDTH
-        y_factor = image_h / INPUT_HEIGHT
+        # No need for x_factor/y_factor relative to original image here, 
+        # since we will un-pad and un-scale later based on letterboxing
 
         for row in rows:
             classes_scores = row[4:]
@@ -157,14 +201,24 @@ def main():
             max_score = classes_scores[max_score_idx]
             
             if max_score >= CONF_THRESHOLD:
-                # Get box coordinates (cx, cy, w, h)
+                # Get box coordinates (cx, cy, w, h) relative to PADDED image
                 cx, cy, w, h = row[0], row[1], row[2], row[3]
                 
-                # Scale back to original image
-                left = int((cx - 0.5 * w) * x_factor)
-                top = int((cy - 0.5 * h) * y_factor)
-                width = int(w * x_factor)
-                height = int(h * y_factor)
+                # Un-pad
+                cx -= pad_left
+                cy -= pad_top
+                
+                # Un-scale
+                cx /= scale
+                cy /= scale
+                w /= scale
+                h /= scale
+                
+                # Calculate top-left corner
+                left = int(cx - 0.5 * w)
+                top = int(cy - 0.5 * h)
+                width = int(w)
+                height = int(h)
                 
                 boxes.append([left, top, width, height])
                 confidences.append(float(max_score))
@@ -172,6 +226,8 @@ def main():
 
         # NMS
         indices = cv2.dnn.NMSBoxes(boxes, confidences, CONF_THRESHOLD, NMS_THRESHOLD)
+
+        garbage_detected_near = False
 
         for i in indices:
             # Depending on opencv version, i might be a list or int
@@ -195,11 +251,12 @@ def main():
                     # Color Logic
                     if distance < 20: 
                         color = (0, 255, 0) # Green
+                        garbage_detected_near = True
                     else:
                         color = (0, 0, 255) # Red
 
                     # Draw Visuals
-                    cvzone.cornerRect(img, (left, top, width, height), l=9, rt=5, colorR=color, colorC=color)
+                    cvzone.cornerRect(img, (top, left, width, height), l=9, rt=5, colorR=color, colorC=color)
                     
                     text = f'{displayName} {int(distance)}cm'
                     cvzone.putTextRect(img, text, (max(0, left), max(35, top)), scale=1.5, thickness=2, offset=5, colorR=color)
@@ -211,6 +268,14 @@ def main():
         cv2.imshow("Pi Garbage Detection", img)
         if cv2.waitKey(1) & 0xFF == ord('q'):
             break
+
+        if garbage_detected_near and (time.time() - last_trigger_time > TRIGGER_COOLDOWN):
+            print("Garbage < 20cm. Starting Automation...")
+            try:
+                automation_pre_test.automation_sequence()
+                last_trigger_time = time.time()
+            except Exception as e:
+                print(f"Automation Error: {e}")
 
     cap.release()
     cv2.destroyAllWindows()
