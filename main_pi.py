@@ -7,7 +7,60 @@ import urllib.request
 import sys
 import time
 import threading
+
 import automation_pre_test
+import RPi.GPIO as GPIO
+
+# ================= GPIO & MOTORS =================
+GPIO.setwarnings(False)
+
+# GPIO Mode is set in automation_pre_test (BCM)
+# We can re-assert it or trust it but automation_pre_test.py does: GPIO.setmode(GPIO.BCM)
+
+# ---- DRIVE MOTORS ----
+IN1, IN2 = 27, 17
+IN3, IN4 = 22, 23
+ENA, ENB = 12, 13
+
+SPEED = 50
+TURN_SPEED = 60
+
+# ================= DRIVE FUNCTIONS =================
+def init_drive_motors():
+    GPIO.setup([IN1, IN2, IN3, IN4, ENA, ENB], GPIO.OUT)
+    global pwm_a, pwm_b
+    pwm_a = GPIO.PWM(ENA, 1000)
+    pwm_b = GPIO.PWM(ENB, 1000)
+    pwm_a.start(SPEED)
+    pwm_b.start(SPEED)
+
+def stop_drive():
+    GPIO.output([IN1, IN2, IN3, IN4], 0)
+
+def forward():
+    pwm_a.ChangeDutyCycle(SPEED)
+    pwm_b.ChangeDutyCycle(SPEED)
+    GPIO.output(IN1,0); GPIO.output(IN2,1)
+    GPIO.output(IN3,0); GPIO.output(IN4,1)
+
+def backward():
+    pwm_a.ChangeDutyCycle(SPEED)
+    pwm_b.ChangeDutyCycle(SPEED)
+    GPIO.output(IN1,1); GPIO.output(IN2,0)
+    GPIO.output(IN3,1); GPIO.output(IN4,0)
+
+def left():
+    pwm_a.ChangeDutyCycle(TURN_SPEED)
+    pwm_b.ChangeDutyCycle(TURN_SPEED)
+    GPIO.output(IN1,0); GPIO.output(IN2,1)
+    GPIO.output(IN3,1); GPIO.output(IN4,0)
+
+def right():
+    pwm_a.ChangeDutyCycle(TURN_SPEED)
+    pwm_b.ChangeDutyCycle(TURN_SPEED)
+    GPIO.output(IN1,1); GPIO.output(IN2,0)
+    GPIO.output(IN3,0); GPIO.output(IN4,1)
+
 
 # --- CONFIGURATION ---
 # 'n' = Nano (Faster, Standard Accuracy)
@@ -74,6 +127,11 @@ garbage_map = {
 # Distance Estimation Constants
 KNOWN_WIDTH = 7.0  # cm
 FOCAL_LENGTH = 500 # Adjusted for lower resolution (needs recalibration)
+
+# Alignment Constants
+TARGET_DISTANCE_MIN = 14
+TARGET_DISTANCE_MAX = 20
+CENTER_TOLERANCE = 50   # pixels
 
 def calculate_distance(focal_length, known_width, pixel_width):
     if pixel_width == 0:
@@ -166,6 +224,12 @@ def main():
     except Exception as e:
         print(f"Automation Init Failed: {e}")
 
+    try:
+        init_drive_motors()
+        print("Drive Motors Initialized")
+    except Exception as e:
+        print(f"Drive Motor Init Failed: {e}")
+
     # Check for model and download if missing
     if not os.path.exists(MODEL_FILE):
         print(f"Model file {MODEL_FILE} not found.")
@@ -212,6 +276,9 @@ def main():
 
     last_trigger_time = 0
     TRIGGER_COOLDOWN = 5
+    
+    # State tracking
+    current_action = "Scanning"
 
     while True:
         success, img = cap.read()
@@ -318,14 +385,78 @@ def main():
         if cv2.waitKey(1) & 0xFF == ord('q'):
             break
 
-        if garbage_detected_near and (time.time() - last_trigger_time > TRIGGER_COOLDOWN):
-            print("Garbage < 20cm. Starting Automation...")
-            try:
-                automation_pre_test.automation_sequence()
-                last_trigger_time = time.time()
-            except Exception as e:
-                print(f"Automation Error: {e}")
+        if garbage_detected_near:
+             # We found pending garbage. Let's find the specific targetbox again to align
+             # The existing logic above iterates all boxes. 
+             # We need to Select the best target (closest/largest) from indices.
+             
+             target_box = None
+             max_area = 0
+             
+             # Re-scan indices to find primary target
+             for i in indices:
+                idx = i if isinstance(i, (int, np.integer)) else i[0]
+                box = boxes[idx]
+                # Filter for garbage classes only
+                cls_id = class_ids[idx]
+                if cls_id < len(classNames) and classNames[cls_id] in garbage_map:
+                    w, h = box[2], box[3]
+                    area = w * h
+                    if area > max_area:
+                        max_area = area
+                        target_box = box
 
+             if target_box:
+                x, y, w, h = target_box
+                cx = x + w // 2
+                img_center = INPUT_WIDTH // 2
+                offset = cx - img_center
+                
+                dist_cm = calculate_distance(FOCAL_LENGTH, KNOWN_WIDTH, min(w, h)) # Recalc just in case
+                
+                # Logic
+                if abs(offset) > CENTER_TOLERANCE:
+                    if offset > 0:
+                        current_action = "Turning Right"
+                        right()
+                    else:
+                        current_action = "Turning Left"
+                        left()
+                else:
+                    # Centered
+                    if dist_cm > TARGET_DISTANCE_MAX:
+                        current_action = "Forward"
+                        forward()
+                    elif dist_cm < TARGET_DISTANCE_MIN:
+                        current_action = "Backward"
+                        backward()
+                    else:
+                        current_action = "Aligned"
+                        stop_drive()
+                        
+                        if (time.time() - last_trigger_time > TRIGGER_COOLDOWN):
+                            print("Aligned & In Range. Starting Automation...")
+                            current_action = "Automation Running"
+                            cv2.putText(img, current_action, (20, 450), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 3)
+                            cv2.imshow("Pi Garbage Detection", img)
+                            cv2.waitKey(1)
+                            
+                            try:
+                                automation_pre_test.automation_sequence()
+                                last_trigger_time = time.time()
+                            except Exception as e:
+                                print(f"Automation Error: {e}")
+                                
+             else:
+                current_action = "No Target"
+                stop_drive()
+        else:
+             current_action = "Scanning"
+             stop_drive()
+
+        cv2.putText(img, f"Action: {current_action}", (20, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+
+    stop_drive()
     cap.release()
     cv2.destroyAllWindows()
 
