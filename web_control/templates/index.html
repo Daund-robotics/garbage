@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RPi Control Panel</title>
+    <style>
+        :root {
+            --bg-color: #121212;
+            --text-color: #e0e0e0;
+            --primary-color: #00ff88;
+            --secondary-color: #ff3366;
+            --card-bg: #1e1e1e;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            display: flex;
+            justify_content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+            overflow: hidden;
+        }
+
+        .container {
+            text-align: center;
+            background-color: var(--card-bg);
+            padding: 40px;
+            border-radius: 20px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+            max-width: 90%;
+            width: 400px;
+        }
+
+        h1 {
+            margin-bottom: 30px;
+            font-weight: 300;
+            letter-spacing: 2px;
+            text-transform: uppercase;
+        }
+
+        .status-indicator {
+            font-size: 1.2rem;
+            margin-bottom: 20px;
+            font-weight: bold;
+        }
+
+        .toggle-switch {
+            position: relative;
+            display: inline-block;
+            width: 120px;
+            height: 60px;
+        }
+
+        .toggle-switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+
+        .slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: #ccc;
+            -webkit-transition: .4s;
+            transition: .4s;
+            border-radius: 60px;
+        }
+
+        .slider:before {
+            position: absolute;
+            content: "";
+            height: 52px;
+            width: 52px;
+            left: 4px;
+            bottom: 4px;
+            background-color: white;
+            -webkit-transition: .4s;
+            transition: .4s;
+            border-radius: 50%;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+        }
+
+        input:checked + .slider {
+            background-color: var(--primary-color);
+            box-shadow: 0 0 15px var(--primary-color);
+        }
+
+        input:focus + .slider {
+            box-shadow: 0 0 1px var(--primary-color);
+        }
+
+        input:checked + .slider:before {
+            -webkit-transform: translateX(60px);
+            -ms-transform: translateX(60px);
+            transform: translateX(60px);
+        }
+
+        /* Status Text Styling */
+        .status-text {
+            display: block;
+            margin-top: 15px;
+            font-size: 1.5rem;
+            font-weight: 600;
+            transition: color 0.3s;
+        }
+        
+        .on-mode { color: var(--primary-color); }
+        .off-mode { color: var(--secondary-color); }
+
+        .loader {
+            border: 4px solid #f3f3f3; /* Light grey */
+            border-top: 4px solid var(--primary-color);
+            border-radius: 50%;
+            width: 20px;
+            height: 20px;
+            animation: spin 1s linear infinite;
+            display: none;
+            margin: 10px auto;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <h1>Control Panel</h1>
+        
+        <label class="toggle-switch">
+            <input type="checkbox" id="modeSwitch" onchange="toggleMode()">
+            <span class="slider"></span>
+        </label>
+
+        <div id="loader" class="loader"></div>
+        <span id="statusText" class="status-text off-mode">MANUAL MODE</span>
+        
+        <p style="margin-top: 30px; font-size: 0.9rem; color: #888;">
+            Connect to WiFi: <strong>Garbage_Hotspot</strong><br>
+            Access: <strong>http://10.42.0.1:5000</strong>
+        </p>
+    </div>
+
+    <script>
+        const switchEl = document.getElementById('modeSwitch');
+        const statusTextEl = document.getElementById('statusText');
+        const loaderEl = document.getElementById('loader');
+        let isFetching = false;
+
+        async function updateStatus() {
+            if (isFetching) return;
+            try {
+                const response = await fetch('/status');
+                const data = await response.json();
+                
+                // Only update if user is not actively toggling
+                // Or force update if state mismatch
+                if (data.running !== switchEl.checked) {
+                    switchEl.checked = data.running;
+                    updateUI(data.running);
+                }
+            } catch (error) {
+                console.error('Error fetching status:', error);
+            }
+        }
+
+        function updateUI(isRunning) {
+            if (isRunning) {
+                statusTextEl.textContent = "AUTO MODE";
+                statusTextEl.className = "status-text on-mode";
+            } else {
+                statusTextEl.textContent = "MANUAL MODE";
+                statusTextEl.className = "status-text off-mode";
+            }
+        }
+
+        async function toggleMode() {
+            isFetching = true; // Block periodic updates
+            loaderEl.style.display = 'block';
+            const isChecked = switchEl.checked;
+            
+            const url = isChecked ? '/start' : '/stop';
+            
+            try {
+                const response = await fetch(url, { method: 'POST' });
+                const data = await response.json();
+                
+                if (data.success) {
+                    updateUI(isChecked);
+                } else {
+                    alert('Operation failed: ' + data.message);
+                    switchEl.checked = !isChecked; // Revert UI
+                    updateUI(!isChecked);
+                }
+            } catch (error) {
+                console.error('Error toggling mode:', error);
+                alert('Connection error');
+                switchEl.checked = !isChecked; // Revert UI
+                updateUI(!isChecked);
+            } finally {
+                loaderEl.style.display = 'none';
+                isFetching = false;
+            }
+        }
+
+        // Initial check
+        updateStatus();
+
+        // Periodic check (every 2 seconds)
+        setInterval(updateStatus, 2000);
+    </script>
+
+</body>
+</html>
