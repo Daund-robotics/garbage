@@ -50,7 +50,7 @@ LIFT_UP = 15
 LIFT_DOWN = 14
 
 # ---- LIMIT SWITCHES ----
-L1 = 5  # Bottom
+L1 = 11  # Bottom
 L2 = 6  # Top
 
 # ---- SENSORS ----

@@ -11,7 +11,7 @@ GPIO.setmode(GPIO.BCM)
 GPIO.setwarnings(False)
 
 # ----- Limit Switches -----
-L1 = 5
+L1 = 11
 L2 = 6
 
 GPIO.setup(L1, GPIO.IN, pull_up_down=GPIO.PUD_UP)
