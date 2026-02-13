@@ -1,4 +1,24 @@
-import RPi.GPIO as GPIO
+try:
+    import RPi.GPIO as GPIO
+except ImportError:
+    print("Warning: RPi.GPIO not found. Using mock for testing.")
+    class MockGPIO:
+        BCM = 10
+        OUT = 0
+        IN = 1
+        PUD_UP = 2
+        def setmode(self, mode): pass
+        def setwarnings(self, flag): pass
+        def setup(self, pin, mode, pull_up_down=None): pass
+        def output(self, pin, state): pass
+        def input(self, pin): return 0
+        def cleanup(self, pins=None): pass
+        class PWM:
+            def __init__(self, pin, freq): pass
+            def start(self, dc): pass
+            def stop(self): pass
+            def ChangeDutyCycle(self, dc): pass
+    GPIO = MockGPIO()
 import time
 
 # ================= PIN DEFINITIONS =================

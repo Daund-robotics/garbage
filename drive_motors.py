@@ -1,8 +1,39 @@
 import cv2
 import numpy as np
 import time
-import RPi.GPIO as GPIO
-import smbus
+import threading
+
+try:
+    import RPi.GPIO as GPIO
+except ImportError:
+    print("Warning: RPi.GPIO not found. Using mock for testing.")
+    class MockGPIO:
+        BCM = 10
+        OUT = 0
+        IN = 1
+        PUD_UP = 2
+        def setmode(self, mode): pass
+        def setwarnings(self, flag): pass
+        def setup(self, pin, mode, pull_up_down=None): pass
+        def output(self, pin, state): pass
+        def input(self, pin): return 0
+        def cleanup(self, pins=None): pass
+        class PWM:
+            def __init__(self, pin, freq): pass
+            def start(self, dc): pass
+            def stop(self): pass
+            def ChangeDutyCycle(self, dc): pass
+    GPIO = MockGPIO()
+
+try:
+    import smbus
+except ImportError:
+    print("Warning: smbus not found. Using mock for testing.")
+    class MockSMBus:
+        def __init__(self, bus): pass
+        def write_byte_data(self, addr, reg, val): pass
+        def read_byte_data(self, addr, reg): return 0
+    smbus = type('obj', (object,), {'SMBus': MockSMBus})
 import threading
 
 # ================= GPIO & MOTORS =================
