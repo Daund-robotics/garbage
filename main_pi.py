@@ -164,6 +164,8 @@ def main():
         automation_pre_test.set_pwm_freq(50)
         time.sleep(0.5)
         automation_pre_test.set_defaults()
+        print("Moving Lift to TOP position...")
+        automation_pre_test.move_up_until_L2()
     except Exception as e:
         print(f"Automation Init Failed: {e}")
 
