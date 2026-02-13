@@ -13,8 +13,8 @@ IN4 = 23
 ENB = 13
 
 # ================= CONFIGURATION =================
-SPEED = 50
-TURN_SPEED = 60
+SPEED = 255
+TURN_SPEED = 200
 
 pwm_a = None
 pwm_b = None
