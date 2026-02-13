@@ -143,11 +143,8 @@ def motor_down():
 # ================= MOVEMENT =================
 def move_up_until_L2():
     motor_up()
-    # INVERTED LOGIC (NC Switches):
-    # Not Pressed = Connected to GND (0)
-    # Pressed = Open (Pulled Up to 1)
-    # We move WHILE it is 0. Stop when 1.
-    while GPIO.input(L2) == 0:
+    # No timeout - wait forever until L2 is pressed (LOW)
+    while GPIO.input(L2) == 1:
         time.sleep(0.05)
     motor_stop()
     print("TOP Reached")
@@ -164,9 +161,8 @@ def move_down_until_L1(check_sensors=False):
 
     REQUIRED_TIME = 3  # seconds stable detection required
     
-    # INVERTED LOGIC (NC Switches):
-    # Move WHILE 0. Stop when 1.
-    while GPIO.input(L1) == 0:
+    # No timeout - wait forever until L1 is pressed (LOW)
+    while GPIO.input(L1) == 1:
 
         if check_sensors:
 
