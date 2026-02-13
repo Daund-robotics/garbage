@@ -3,8 +3,8 @@ import os
 
 # Configuration
 DATA_YAML = r"D:\garbage updated\dataset\data.yaml"
-MODEL_NAME = "yolov8n.pt"  # Load a pretrained model (recommended for training)
-EPOCHS = 50
+MODEL_NAME = "yolov8s.pt"  # Using 'Small' model for better accuracy than 'Nano'
+EPOCHS = 100  # Increased epochs for better learning
 IMG_SIZE = 640
 
 def train():
