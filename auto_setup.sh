@@ -16,6 +16,20 @@ if [ "$EUID" -ne 0 ]; then
   exit 1
 fi
 
+echo "[0/4] Cleaning up conflicts (dhcpcd/wpa_supplicant)..."
+# Stop and disable dhcpcd if it exists, as it conflicts with NetworkManager hotspot
+if systemctl list-unit-files | grep -q dhcpcd; then
+    echo "Disabling dhcpcd to allow NetworkManager to manage Wi-Fi..."
+    systemctl stop dhcpcd
+    systemctl disable dhcpcd
+fi
+
+# Unblock Wi-Fi
+if command -v rfkill &> /dev/null; then
+    echo "Unblocking Wi-Fi..."
+    rfkill unblock wifi
+fi
+
 echo "[1/4] Installing dependencies..."
 apt-get update -y
 apt-get install -y network-manager python3-flask python3-pip
@@ -29,12 +43,21 @@ echo "[2/4] Configuring Wi-Fi Hotspot..."
 nmcli connection delete "$HOTSPOT_SSID" 2>/dev/null || true
 
 # Create new hotspot connection
+# 802-11-wireless.mode ap: Access Point mode
+# ipv4.method shared: Share internet (or just act as a DHCP server)
+echo "Creating Hotspot Connection..."
 if nmcli con add type wifi ifname wlan0 con-name "$HOTSPOT_SSID" autoconnect yes ssid "$HOTSPOT_SSID"; then
     nmcli con modify "$HOTSPOT_SSID" 802-11-wireless.mode ap 802-11-wireless.band bg ipv4.method shared
     nmcli con modify "$HOTSPOT_SSID" wifi-sec.key-mgmt wpa-psk wifi-sec.psk "$HOTSPOT_PASSWORD"
+    
+    # Force bring up
+    nmcli con up "$HOTSPOT_SSID"
+    
     echo "Hotspot '$HOTSPOT_SSID' created with password '$HOTSPOT_PASSWORD'."
 else
-    echo "Error creating hotspot. Ensure wlan0 is available."
+    echo "Error creating hotspot. ensure wlan0 is available."
+    echo "Trying to list devices:"
+    nmcli dev
 fi
 
 echo "[3/4] Setting up Web Control Service..."
