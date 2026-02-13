@@ -36,7 +36,7 @@ GPIO.setmode(GPIO.BCM)
 GPIO.setwarnings(False)
 
 # ---- LIMIT SWITCHES ----
-L1 = 5
+L1 = 11
 L2 = 6
 
 # ---- SENSOR PINS ----
@@ -143,10 +143,7 @@ def motor_down():
 # ================= MOVEMENT =================
 def move_up_until_L2():
     motor_up()
-    # REVERTED LOGIC (Original):
-    # Not Pressed = Pulled Up (1)
-    # Pressed = Shorted to GND (0)
-    # We move WHILE it is 1. Stop when 0.
+    # No timeout - wait forever until L2 is pressed (LOW)
     while GPIO.input(L2) == 1:
         time.sleep(0.05)
     motor_stop()
@@ -164,8 +161,7 @@ def move_down_until_L1(check_sensors=False):
 
     REQUIRED_TIME = 3  # seconds stable detection required
     
-    # REVERTED LOGIC (Original):
-    # Move WHILE 1. Stop when 0.
+    # No timeout - wait forever until L1 is pressed (LOW)
     while GPIO.input(L1) == 1:
 
         if check_sensors:
