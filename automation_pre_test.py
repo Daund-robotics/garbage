@@ -143,7 +143,10 @@ def motor_down():
 # ================= MOVEMENT =================
 def move_up_until_L2():
     motor_up()
-    # No timeout - wait forever until L2 is pressed (LOW)
+    # REVERTED LOGIC (Original):
+    # Not Pressed = Pulled Up (1)
+    # Pressed = Shorted to GND (0)
+    # We move WHILE it is 1. Stop when 0.
     while GPIO.input(L2) == 1:
         time.sleep(0.05)
     motor_stop()
@@ -161,7 +164,8 @@ def move_down_until_L1(check_sensors=False):
 
     REQUIRED_TIME = 3  # seconds stable detection required
     
-    # No timeout - wait forever until L1 is pressed (LOW)
+    # REVERTED LOGIC (Original):
+    # Move WHILE 1. Stop when 0.
     while GPIO.input(L1) == 1:
 
         if check_sensors:
