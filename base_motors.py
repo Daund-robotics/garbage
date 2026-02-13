@@ -13,8 +13,8 @@ IN4 = 23
 ENB = 13
 
 # ================= CONFIGURATION =================
-SPEED = 255
-TURN_SPEED = 200
+SPEED = 100
+TURN_SPEED = 90
 
 pwm_a = None
 pwm_b = None
@@ -30,11 +30,13 @@ def init():
     
     GPIO.setup([IN1, IN2, IN3, IN4, ENA, ENB], GPIO.OUT)
     
-    pwm_a = GPIO.PWM(ENA, 1000)
-    pwm_b = GPIO.PWM(ENB, 1000)
+    if pwm_a is None:
+        pwm_a = GPIO.PWM(ENA, 1000)
+        pwm_a.start(SPEED)
     
-    pwm_a.start(SPEED)
-    pwm_b.start(SPEED)
+    if pwm_b is None:
+        pwm_b = GPIO.PWM(ENB, 1000)
+        pwm_b.start(SPEED)
     
     initialized = True
     print("✅ Base Motors Initialized")

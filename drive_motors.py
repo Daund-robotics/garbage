@@ -41,8 +41,8 @@ SERVO_MAX = 512
 TARGET_DISTANCE_MIN = 14
 TARGET_DISTANCE_MAX = 20
 CENTER_TOLERANCE = 50   # pixels
-SPEED = 255
-TURN_SPEED = 200
+SPEED = 100
+TURN_SPEED = 90
 
 # Distance Estimation
 KNOWN_WIDTH = 7.0  # cm (approx width of bottle/can)
