@@ -6,11 +6,11 @@ GPIO.setmode(GPIO.BCM)
 GPIO.setwarnings(False)
 
 # Pin Definitions
-# User specified "wet" sensor, which is Pin 20 in existing code.
-# We assume Pin 20 is ECHO. 
-# We default TRIG to 21 (please change if connected elsewhere).
-GPIO_TRIGGER = 21
-GPIO_ECHO = 20
+# User specified pins:
+# TRIG = 8
+# ECHO = 7
+GPIO_TRIGGER = 8
+GPIO_ECHO = 7
 
 print(f"Ultrasonic Measurement - TRIG: {GPIO_TRIGGER}, ECHO: {GPIO_ECHO}")
 
