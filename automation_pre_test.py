@@ -161,8 +161,10 @@ def move_down_until_L1(check_sensors=False):
 
     REQUIRED_TIME = 3  # seconds stable detection required
     
-    # No timeout - wait forever until L1 is pressed (LOW)
-    while GPIO.input(L1) == 1:
+    # Updated to handle potential NC switch or inverted logic
+    # User reported L1 reads 'Pressed' (0) when not pressed. 
+    # So we loop while it is 0, and stop when it becomes 1 (High).
+    while GPIO.input(L1) == 0:
 
         if check_sensors:
 
