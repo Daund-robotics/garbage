@@ -356,8 +356,8 @@ def main():
             CENTER_TOLERANCE = 50
             
             # Ranges
-            TARGET_MIN = 14
-            TARGET_MAX = 20
+            TARGET_MIN = 5
+            TARGET_MAX = 10
             
             status = "Idle"
             
