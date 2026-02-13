@@ -143,12 +143,8 @@ def motor_down():
 # ================= MOVEMENT =================
 def move_up_until_L2():
     motor_up()
-    # Add timeout to prevent infinite loop
-    start_time = time.time()
+    # No timeout - wait forever until L2 is pressed (LOW)
     while GPIO.input(L2) == 1:
-        if time.time() - start_time > 10: # 10s timeout
-            print("Timeout moving up!")
-            break
         time.sleep(0.05)
     motor_stop()
     print("TOP Reached")
@@ -165,13 +161,8 @@ def move_down_until_L1(check_sensors=False):
 
     REQUIRED_TIME = 3  # seconds stable detection required
     
-    start_time = time.time()
-
+    # No timeout - wait forever until L1 is pressed (LOW)
     while GPIO.input(L1) == 1:
-        # Safety timeout
-        if time.time() - start_time > 15: # 15s timeout
-             print("Timeout moving down!")
-             break
 
         if check_sensors:
 
